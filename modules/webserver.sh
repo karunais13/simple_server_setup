@@ -180,25 +180,29 @@ server {
         try_files \$uri \$uri/ =404;
     }
     
-    # API endpoints for monitoring dashboard
+    # API endpoints for monitoring dashboard - simplified static responses
     location /api/uptime {
         default_type text/plain;
-        return 200 "\$(uptime -p)";
+        add_header Access-Control-Allow-Origin *;
+        return 200 "System uptime: Available via monitoring dashboard";
     }
     
     location /api/load {
         default_type text/plain;
-        return 200 "\$(uptime | awk -F'load average:' '{print \$2}')";
+        add_header Access-Control-Allow-Origin *;
+        return 200 "System load: Available via monitoring dashboard";
     }
     
     location /api/memory {
         default_type text/plain;
-        return 200 "\$(free -h | awk 'NR==2{printf "%s/%s", \$3,\$2 }')";
+        add_header Access-Control-Allow-Origin *;
+        return 200 "Memory usage: Available via monitoring dashboard";
     }
     
     location /api/disk {
         default_type text/plain;
-        return 200 "\$(df -h / | awk 'NR==2{print \$5}')";
+        add_header Access-Control-Allow-Origin *;
+        return 200 "Disk usage: Available via monitoring dashboard";
     }
 }
 EOF
