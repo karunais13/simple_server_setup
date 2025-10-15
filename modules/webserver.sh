@@ -146,16 +146,50 @@ server {
         try_files \$uri \$uri/ =404;
     }
     
-    # API rate limiting
-    location /api/ {
+    # API endpoints for system information
+    location /api/uptime {
         limit_req zone=api burst=20 nodelay;
-        try_files \$uri \$uri/ =404;
+        fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/api.php;
+        fastcgi_param QUERY_STRING endpoint=uptime;
+        include fastcgi_params;
+    }
+    
+    location /api/load {
+        limit_req zone=api burst=20 nodelay;
+        fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/api.php;
+        fastcgi_param QUERY_STRING endpoint=load;
+        include fastcgi_params;
+    }
+    
+    location /api/memory {
+        limit_req zone=api burst=20 nodelay;
+        fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/api.php;
+        fastcgi_param QUERY_STRING endpoint=memory;
+        include fastcgi_params;
+    }
+    
+    location /api/disk {
+        limit_req zone=api burst=20 nodelay;
+        fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/api.php;
+        fastcgi_param QUERY_STRING endpoint=disk;
+        include fastcgi_params;
     }
     
     # Static files caching
     location ~* \.(jpg|jpeg|png|gif|ico|css|js|pdf|txt)$ {
         expires 1y;
         add_header Cache-Control "public, immutable";
+    }
+    
+    # Monitoring dashboard
+    location /monitoring {
+        alias /var/www/monitoring;
+        index index.html;
+        try_files \$uri \$uri/ =404;
     }
     
     # Main location
@@ -474,9 +508,108 @@ create_web_content() {
 </html>
 EOF
     
+    # Create basic monitoring dashboard if it doesn't exist
+    if [[ ! -d /var/www/monitoring ]]; then
+        echo -e "${YELLOW}Creating basic monitoring dashboard...${NC}"
+        mkdir -p /var/www/monitoring
+        
+        cat > /var/www/monitoring/index.html << EOF
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Monitoring Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .card { background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 5px; border-left: 4px solid #007bff; }
+        .metric { margin: 10px 0; }
+        .status { padding: 10px; border-radius: 5px; margin: 10px 0; }
+        .online { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 System Monitoring Dashboard</h1>
+        <p>Welcome to your Ubuntu server monitoring dashboard.</p>
+        
+        <div class="card">
+            <h3>📊 System Status</h3>
+            <div class="status online">✅ System Status: Online</div>
+            <div class="metric"><strong>Hostname:</strong> <span id="hostname">Loading...</span></div>
+            <div class="metric"><strong>Uptime:</strong> <span id="uptime">Loading...</span></div>
+            <div class="metric"><strong>Load Average:</strong> <span id="load-average">Loading...</span></div>
+            <div class="metric"><strong>Memory Usage:</strong> <span id="memory-usage">Loading...</span></div>
+            <div class="metric"><strong>Disk Usage:</strong> <span id="disk-usage">Loading...</span></div>
+        </div>
+        
+        <div class="card">
+            <h3>🔗 Quick Links</h3>
+            <p><a href="/">← Back to Main Page</a></p>
+            <p><a href="http://$(hostname -I | awk '{print $1}'):19999" target="_blank">Netdata Dashboard (if installed)</a></p>
+            <p><a href="https://$(hostname -I | awk '{print $1}'):9443" target="_blank">Portainer (if installed)</a></p>
+        </div>
+    </div>
+    
+    <script>
+        // Function to update server information
+        async function updateServerInfo() {
+            try {
+                // Update hostname
+                document.getElementById('hostname').textContent = window.location.hostname;
+                
+                // Fetch and update dynamic information
+                const [uptimeResponse, loadResponse, memoryResponse, diskResponse] = await Promise.all([
+                    fetch('/api/uptime').catch(() => null),
+                    fetch('/api/load').catch(() => null),
+                    fetch('/api/memory').catch(() => null),
+                    fetch('/api/disk').catch(() => null)
+                ]);
+                
+                if (uptimeResponse && uptimeResponse.ok) {
+                    document.getElementById('uptime').textContent = await uptimeResponse.text();
+                } else {
+                    document.getElementById('uptime').textContent = 'N/A';
+                }
+                
+                if (loadResponse && loadResponse.ok) {
+                    document.getElementById('load-average').textContent = await loadResponse.text();
+                } else {
+                    document.getElementById('load-average').textContent = 'N/A';
+                }
+                
+                if (memoryResponse && memoryResponse.ok) {
+                    document.getElementById('memory-usage').textContent = await memoryResponse.text();
+                } else {
+                    document.getElementById('memory-usage').textContent = 'N/A';
+                }
+                
+                if (diskResponse && diskResponse.ok) {
+                    document.getElementById('disk-usage').textContent = await diskResponse.text();
+                } else {
+                    document.getElementById('disk-usage').textContent = 'N/A';
+                }
+                
+            } catch (error) {
+                console.error('Error fetching server information:', error);
+            }
+        }
+        
+        // Update on page load and every 30 seconds
+        document.addEventListener('DOMContentLoaded', updateServerInfo);
+        setInterval(updateServerInfo, 30000);
+    </script>
+</body>
+</html>
+EOF
+    fi
+    
     # Set permissions
     chown -R www-data:www-data /var/www/html
     chmod -R 755 /var/www/html
+    chown -R www-data:www-data /var/www/monitoring
+    chmod -R 755 /var/www/monitoring
     
     echo -e "${GREEN}Sample web content created successfully${NC}"
 }
