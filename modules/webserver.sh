@@ -219,26 +219,38 @@ $endpoint = $_GET['endpoint'] ?? '';
 
 switch ($endpoint) {
     case 'uptime':
-        echo trim(shell_exec('uptime -p'));
+        $result = shell_exec('uptime -p 2>/dev/null');
+        echo $result ? trim($result) : 'N/A';
         break;
     case 'load':
-        $uptime = shell_exec('uptime');
-        if (preg_match('/load average:\s*(.+)/', $uptime, $matches)) {
+        $uptime = shell_exec('uptime 2>/dev/null');
+        if ($uptime && preg_match('/load average:\s*(.+)/', $uptime, $matches)) {
             echo trim($matches[1]);
         } else {
             echo 'N/A';
         }
         break;
     case 'memory':
-        $free = shell_exec('free -h');
-        $lines = explode("\n", $free);
-        if (isset($lines[1])) {
-            $parts = preg_split('/\s+/', trim($lines[1]));
-            if (count($parts) >= 3) {
-                $used = $parts[2];
-                $total = $parts[1];
-                $percentage = round(($parts[2] / $parts[1]) * 100, 1);
-                echo "$used/$total ($percentage%)";
+        $free = shell_exec('free -h 2>/dev/null');
+        if ($free) {
+            $lines = explode("\n", $free);
+            if (isset($lines[1])) {
+                $parts = preg_split('/\s+/', trim($lines[1]));
+                if (count($parts) >= 3) {
+                    $used = $parts[2];
+                    $total = $parts[1];
+                    // Calculate percentage properly
+                    $used_num = (float)str_replace(['G', 'M', 'K'], ['', '', ''], $used);
+                    $total_num = (float)str_replace(['G', 'M', 'K'], ['', '', ''], $total);
+                    if ($total_num > 0) {
+                        $percentage = round(($used_num / $total_num) * 100, 1);
+                        echo "$used/$total ($percentage%)";
+                    } else {
+                        echo "$used/$total";
+                    }
+                } else {
+                    echo 'N/A';
+                }
             } else {
                 echo 'N/A';
             }
@@ -247,15 +259,19 @@ switch ($endpoint) {
         }
         break;
     case 'disk':
-        $df = shell_exec('df -h /');
-        $lines = explode("\n", $df);
-        if (isset($lines[1])) {
-            $parts = preg_split('/\s+/', trim($lines[1]));
-            if (count($parts) >= 5) {
-                $used = $parts[2];
-                $total = $parts[1];
-                $percentage = $parts[4];
-                echo "$used/$total ($percentage)";
+        $df = shell_exec('df -h / 2>/dev/null');
+        if ($df) {
+            $lines = explode("\n", $df);
+            if (isset($lines[1])) {
+                $parts = preg_split('/\s+/', trim($lines[1]));
+                if (count($parts) >= 5) {
+                    $used = $parts[2];
+                    $total = $parts[1];
+                    $percentage = $parts[4];
+                    echo "$used/$total ($percentage)";
+                } else {
+                    echo 'N/A';
+                }
             } else {
                 echo 'N/A';
             }
@@ -548,7 +564,6 @@ EOF
             <h3>🔗 Quick Links</h3>
             <p><a href="/">← Back to Main Page</a></p>
             <p><a href="http://$(hostname -I | awk '{print $1}'):19999" target="_blank">Netdata Dashboard (if installed)</a></p>
-            <p><a href="https://$(hostname -I | awk '{print $1}'):9443" target="_blank">Portainer (if installed)</a></p>
         </div>
     </div>
     
@@ -559,40 +574,33 @@ EOF
                 // Update hostname
                 document.getElementById('hostname').textContent = window.location.hostname;
                 
-                // Fetch and update dynamic information
-                const [uptimeResponse, loadResponse, memoryResponse, diskResponse] = await Promise.all([
-                    fetch('/api/uptime').catch(() => null),
-                    fetch('/api/load').catch(() => null),
-                    fetch('/api/memory').catch(() => null),
-                    fetch('/api/disk').catch(() => null)
+                // Function to fetch API data with better error handling
+                async function fetchApiData(endpoint, elementId) {
+                    try {
+                        const response = await fetch('/api/' + endpoint);
+                        if (response.ok) {
+                            const data = await response.text();
+                            document.getElementById(elementId).textContent = data;
+                        } else {
+                            console.error('API error for ' + endpoint + ':', response.status);
+                            document.getElementById(elementId).textContent = 'Error';
+                        }
+                    } catch (error) {
+                        console.error('Fetch error for ' + endpoint + ':', error);
+                        document.getElementById(elementId).textContent = 'N/A';
+                    }
+                }
+                
+                // Fetch all API data
+                await Promise.all([
+                    fetchApiData('uptime', 'uptime'),
+                    fetchApiData('load', 'load-average'),
+                    fetchApiData('memory', 'memory-usage'),
+                    fetchApiData('disk', 'disk-usage')
                 ]);
                 
-                if (uptimeResponse && uptimeResponse.ok) {
-                    document.getElementById('uptime').textContent = await uptimeResponse.text();
-                } else {
-                    document.getElementById('uptime').textContent = 'N/A';
-                }
-                
-                if (loadResponse && loadResponse.ok) {
-                    document.getElementById('load-average').textContent = await loadResponse.text();
-                } else {
-                    document.getElementById('load-average').textContent = 'N/A';
-                }
-                
-                if (memoryResponse && memoryResponse.ok) {
-                    document.getElementById('memory-usage').textContent = await memoryResponse.text();
-                } else {
-                    document.getElementById('memory-usage').textContent = 'N/A';
-                }
-                
-                if (diskResponse && diskResponse.ok) {
-                    document.getElementById('disk-usage').textContent = await diskResponse.text();
-                } else {
-                    document.getElementById('disk-usage').textContent = 'N/A';
-                }
-                
             } catch (error) {
-                console.error('Error fetching server information:', error);
+                console.error('Error updating server information:', error);
             }
         }
         
