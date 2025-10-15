@@ -150,32 +150,28 @@ server {
     location /api/uptime {
         limit_req zone=api burst=20 nodelay;
         fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
-        fastcgi_param SCRIPT_FILENAME /var/www/html/api.php;
-        fastcgi_param QUERY_STRING endpoint=uptime;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/api/uptime.php;
         include fastcgi_params;
     }
     
     location /api/load {
         limit_req zone=api burst=20 nodelay;
         fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
-        fastcgi_param SCRIPT_FILENAME /var/www/html/api.php;
-        fastcgi_param QUERY_STRING endpoint=load;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/api/load.php;
         include fastcgi_params;
     }
     
     location /api/memory {
         limit_req zone=api burst=20 nodelay;
         fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
-        fastcgi_param SCRIPT_FILENAME /var/www/html/api.php;
-        fastcgi_param QUERY_STRING endpoint=memory;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/api/memory.php;
         include fastcgi_params;
     }
     
     location /api/disk {
         limit_req zone=api burst=20 nodelay;
         fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
-        fastcgi_param SCRIPT_FILENAME /var/www/html/api.php;
-        fastcgi_param QUERY_STRING endpoint=disk;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/api/disk.php;
         include fastcgi_params;
     }
     
@@ -206,8 +202,11 @@ server {
 }
 EOF
     
-    # Create system info API PHP script
-    cat > /var/www/html/api.php << 'EOF'
+    # Create individual API PHP scripts for each endpoint
+    mkdir -p /var/www/html/api
+    
+    # Uptime API
+    cat > /var/www/html/api/uptime.php << 'EOF'
 <?php
 header('Content-Type: text/plain');
 header('Access-Control-Allow-Origin: *');
@@ -215,74 +214,94 @@ header('Cache-Control: no-cache, no-store, must-revalidate');
 header('Pragma: no-cache');
 header('Expires: 0');
 
-$endpoint = $_GET['endpoint'] ?? '';
+$result = shell_exec('uptime -p 2>/dev/null');
+echo $result ? trim($result) : 'N/A';
+?>
+EOF
 
-switch ($endpoint) {
-    case 'uptime':
-        $result = shell_exec('uptime -p 2>/dev/null');
-        echo $result ? trim($result) : 'N/A';
-        break;
-    case 'load':
-        $uptime = shell_exec('uptime 2>/dev/null');
-        if ($uptime && preg_match('/load average:\s*(.+)/', $uptime, $matches)) {
-            echo trim($matches[1]);
-        } else {
-            echo 'N/A';
-        }
-        break;
-    case 'memory':
-        $free = shell_exec('free -h 2>/dev/null');
-        if ($free) {
-            $lines = explode("\n", $free);
-            if (isset($lines[1])) {
-                $parts = preg_split('/\s+/', trim($lines[1]));
-                if (count($parts) >= 3) {
-                    $used = $parts[2];
-                    $total = $parts[1];
-                    // Calculate percentage properly
-                    $used_num = (float)str_replace(['G', 'M', 'K'], ['', '', ''], $used);
-                    $total_num = (float)str_replace(['G', 'M', 'K'], ['', '', ''], $total);
-                    if ($total_num > 0) {
-                        $percentage = round(($used_num / $total_num) * 100, 1);
-                        echo "$used/$total ($percentage%)";
-                    } else {
-                        echo "$used/$total";
-                    }
-                } else {
-                    echo 'N/A';
-                }
+    # Load API
+    cat > /var/www/html/api/load.php << 'EOF'
+<?php
+header('Content-Type: text/plain');
+header('Access-Control-Allow-Origin: *');
+header('Cache-Control: no-cache, no-store, must-revalidate');
+header('Pragma: no-cache');
+header('Expires: 0');
+
+$uptime = shell_exec('uptime 2>/dev/null');
+if ($uptime && preg_match('/load average:\s*(.+)/', $uptime, $matches)) {
+    echo trim($matches[1]);
+} else {
+    echo 'N/A';
+}
+?>
+EOF
+
+    # Memory API
+    cat > /var/www/html/api/memory.php << 'EOF'
+<?php
+header('Content-Type: text/plain');
+header('Access-Control-Allow-Origin: *');
+header('Cache-Control: no-cache, no-store, must-revalidate');
+header('Pragma: no-cache');
+header('Expires: 0');
+
+$free = shell_exec('free -h 2>/dev/null');
+if ($free) {
+    $lines = explode("\n", $free);
+    if (isset($lines[1])) {
+        $parts = preg_split('/\s+/', trim($lines[1]));
+        if (count($parts) >= 3) {
+            $used = $parts[2];
+            $total = $parts[1];
+            // Calculate percentage properly
+            $used_num = (float)str_replace(['G', 'M', 'K'], ['', '', ''], $used);
+            $total_num = (float)str_replace(['G', 'M', 'K'], ['', '', ''], $total);
+            if ($total_num > 0) {
+                $percentage = round(($used_num / $total_num) * 100, 1);
+                echo "$used/$total ($percentage%)";
             } else {
-                echo 'N/A';
+                echo "$used/$total";
             }
         } else {
             echo 'N/A';
         }
-        break;
-    case 'disk':
-        $df = shell_exec('df -h / 2>/dev/null');
-        if ($df) {
-            $lines = explode("\n", $df);
-            if (isset($lines[1])) {
-                $parts = preg_split('/\s+/', trim($lines[1]));
-                if (count($parts) >= 5) {
-                    $used = $parts[2];
-                    $total = $parts[1];
-                    $percentage = $parts[4];
-                    echo "$used/$total ($percentage)";
-                } else {
-                    echo 'N/A';
-                }
-            } else {
-                echo 'N/A';
-            }
+    } else {
+        echo 'N/A';
+    }
+} else {
+    echo 'N/A';
+}
+?>
+EOF
+
+    # Disk API
+    cat > /var/www/html/api/disk.php << 'EOF'
+<?php
+header('Content-Type: text/plain');
+header('Access-Control-Allow-Origin: *');
+header('Cache-Control: no-cache, no-store, must-revalidate');
+header('Pragma: no-cache');
+header('Expires: 0');
+
+$df = shell_exec('df -h / 2>/dev/null');
+if ($df) {
+    $lines = explode("\n", $df);
+    if (isset($lines[1])) {
+        $parts = preg_split('/\s+/', trim($lines[1]));
+        if (count($parts) >= 5) {
+            $used = $parts[2];
+            $total = $parts[1];
+            $percentage = $parts[4];
+            echo "$used/$total ($percentage)";
         } else {
             echo 'N/A';
         }
-        break;
-    default:
-        http_response_code(400);
-        echo 'Invalid endpoint';
-        break;
+    } else {
+        echo 'N/A';
+    }
+} else {
+    echo 'N/A';
 }
 ?>
 EOF
@@ -306,29 +325,25 @@ server {
     # API endpoints for monitoring dashboard
     location /api/uptime {
         fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
-        fastcgi_param SCRIPT_FILENAME /var/www/html/api.php;
-        fastcgi_param QUERY_STRING endpoint=uptime;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/api/uptime.php;
         include fastcgi_params;
     }
     
     location /api/load {
         fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
-        fastcgi_param SCRIPT_FILENAME /var/www/html/api.php;
-        fastcgi_param QUERY_STRING endpoint=load;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/api/load.php;
         include fastcgi_params;
     }
     
     location /api/memory {
         fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
-        fastcgi_param SCRIPT_FILENAME /var/www/html/api.php;
-        fastcgi_param QUERY_STRING endpoint=memory;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/api/memory.php;
         include fastcgi_params;
     }
     
     location /api/disk {
         fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
-        fastcgi_param SCRIPT_FILENAME /var/www/html/api.php;
-        fastcgi_param QUERY_STRING endpoint=disk;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/api/disk.php;
         include fastcgi_params;
     }
 }
