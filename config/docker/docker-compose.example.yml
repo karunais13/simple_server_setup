@@ -1,0 +1,119 @@
+version: '3.8'
+
+services:
+  # Web Application
+  webapp:
+    image: nginx:alpine
+    container_name: webapp
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./web:/usr/share/nginx/html
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Database
+  database:
+    image: mysql:8.0
+    container_name: database
+    environment:
+      MYSQL_ROOT_PASSWORD: your_root_password
+      MYSQL_DATABASE: your_database
+      MYSQL_USER: your_user
+      MYSQL_PASSWORD: your_password
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d
+    ports:
+      - "3306:3306"
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Redis Cache
+  redis:
+    image: redis:alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Application Backend
+  backend:
+    image: your-backend-image:latest
+    container_name: backend
+    environment:
+      - DATABASE_URL=mysql://your_user:your_password@database:3306/your_database
+      - REDIS_URL=redis://redis:6379
+    ports:
+      - "8000:8000"
+    depends_on:
+      - database
+      - redis
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Backup Service
+  backup:
+    image: alpine:latest
+    container_name: backup
+    volumes:
+      - ./backup:/backup
+      - db_data:/data/db:ro
+    command: |
+      sh -c "
+        apk add --no-cache mysql-client
+        while true; do
+          mysqldump -h database -u your_user -pyour_password your_database > /backup/db_$(date +%Y%m%d_%H%M%S).sql
+          sleep 86400
+        done
+      "
+    depends_on:
+      - database
+    restart: unless-stopped
+    networks:
+      - app-network
+
+volumes:
+  db_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  app-network:
+    driver: bridge 

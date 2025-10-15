@@ -1,0 +1,51 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Node Exporter
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['localhost:9100']
+
+  # Nginx (if using nginx_exporter)
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['localhost:9113']
+
+  # MySQL (if using mysqld_exporter)
+  - job_name: 'mysql'
+    static_configs:
+      - targets: ['localhost:9104']
+
+  # PostgreSQL (if using postgres_exporter)
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['localhost:9187']
+
+  # Docker (if using cadvisor)
+  - job_name: 'docker'
+    static_configs:
+      - targets: ['localhost:8080']
+
+  # Custom application
+  - job_name: 'your-app'
+    static_configs:
+      - targets: ['localhost:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # - alertmanager:9093 
