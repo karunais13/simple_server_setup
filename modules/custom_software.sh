@@ -223,9 +223,8 @@ install_container_tools() {
     fi
     
     # Install Docker Compose (if not already installed)
-    if ! command -v docker-compose >/dev/null 2>&1 && ! docker compose version >/dev/null 2>&1; then
-        curl -L "https://github.com/docker/compose/releases/download/v2.20.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-        chmod +x /usr/local/bin/docker-compose
+    if ! docker compose version >/dev/null 2>&1; then
+        echo -e "${YELLOW}Docker Compose v2 should be available with Docker CE. Please install Docker first.${NC}"
     fi
     
     log "Container tools installed"
@@ -335,7 +334,7 @@ show_installed_software() {
     # Container tools
     echo -e "\n${WHITE}Container Tools:${NC}"
     echo -e "  Docker: $(docker --version 2>/dev/null || echo 'Not installed')"
-    echo -e "  Docker Compose: $(docker-compose --version 2>/dev/null || docker compose version 2>/dev/null | head -1 || echo 'Not installed')"
+    echo -e "  Docker Compose: $(docker compose version 2>/dev/null | head -1 || echo 'Not installed')"
     echo -e "  kubectl: $(kubectl version --client 2>/dev/null | head -1 || echo 'Not installed')"
     echo -e "  Helm: $(helm version 2>/dev/null | head -1 || echo 'Not installed')"
     
@@ -368,7 +367,7 @@ main() {
     echo -e "${CYAN}5.${NC} Office Tools (libreoffice, pandoc, etc.)"
     echo -e "${CYAN}6.${NC} Security Tools (lynis, gpg, etc.)"
     echo -e "${CYAN}7.${NC} Cloud Tools (aws, azure, gcloud, terraform)"
-    echo -e "${CYAN}8.${NC} Container Tools (kubectl, helm, docker-compose)"
+    echo -e "${CYAN}8.${NC} Container Tools (kubectl, helm, docker compose)"
     echo -e "${CYAN}9.${NC} Monitoring Tools (prometheus, grafana, alertmanager)"
     echo -e "${CYAN}10.${NC} Custom Package"
     echo ""

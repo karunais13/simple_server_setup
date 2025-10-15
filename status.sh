@@ -160,7 +160,7 @@ show_docker_status() {
     
     if command -v docker >/dev/null 2>&1; then
         echo -e "${WHITE}Docker Version:${NC} $(docker --version)"
-        echo -e "${WHITE}Docker Compose Version:${NC} $(docker-compose --version)"
+        echo -e "${WHITE}Docker Compose Version:${NC} $(docker compose version)"
         echo -e "${WHITE}Running Containers:${NC} $(docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | wc -l)"
         echo -e "${WHITE}Total Images:${NC} $(docker images | wc -l)"
         echo ""

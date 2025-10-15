@@ -58,8 +58,13 @@ install_docker() {
     systemctl start docker
     systemctl enable docker
     
-    # Add current user to docker group
-    usermod -aG docker $SUDO_USER
+    # Add current user to docker group (if not already added)
+    if ! groups $SUDO_USER | grep -q docker; then
+        usermod -aG docker $SUDO_USER
+        echo -e "${YELLOW}User $SUDO_USER added to docker group. Please log out and back in for changes to take effect.${NC}"
+    else
+        echo -e "${GREEN}User $SUDO_USER is already in docker group${NC}"
+    fi
     
     echo -e "${GREEN}Docker installed successfully${NC}"
 }
@@ -68,14 +73,11 @@ install_docker() {
 install_docker_compose() {
     echo -e "${YELLOW}Installing Docker Compose...${NC}"
     
-    # Install Docker Compose v2 (included with Docker)
+    # Check Docker Compose v2 (included with Docker)
     if command -v docker compose >/dev/null 2>&1; then
         echo -e "${GREEN}Docker Compose v2 is already installed${NC}"
     else
-        # Install Docker Compose v1 as fallback
-        curl -L "https://github.com/docker/compose/releases/download/v2.20.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-        chmod +x /usr/local/bin/docker-compose
-        echo -e "${GREEN}Docker Compose installed successfully${NC}"
+        echo -e "${YELLOW}Docker Compose v2 should be available with Docker CE. If not working, please check Docker installation.${NC}"
     fi
 }
 
@@ -276,7 +278,7 @@ services:
     ports:
       - "19999:19999"
     volumes:
-      - /opt/netdata/config:/etc/netdata:ro
+      - /opt/netdata/config:/etc/netdata
       - /opt/netdata/data:/var/lib/netdata
       - /opt/netdata/logs:/var/log/netdata
       - /proc:/host/proc:ro
@@ -320,6 +322,14 @@ EOF
     chown -R 201:201 /opt/netdata/data
     chown -R 201:201 /opt/netdata/logs
     
+    # Ensure Docker group exists and has correct GID
+    if ! getent group docker >/dev/null 2>&1; then
+        groupadd -g 988 docker
+        echo -e "${GREEN}Created docker group with GID 988${NC}"
+    else
+        echo -e "${GREEN}Docker group already exists${NC}"
+    fi
+    
     # Create log directories if they don't exist
     mkdir -p /var/log/monitoring
     mkdir -p /var/log/system-alerts
@@ -329,6 +339,13 @@ EOF
     chmod 755 /var/log/monitoring
     chmod 755 /var/log/system-alerts
     chmod 755 /var/log/docker
+    
+    # Stop and remove existing Netdata container if it exists
+    if docker ps -a --format "{{.Names}}" | grep -q "^netdata$"; then
+        echo -e "${YELLOW}Stopping and removing existing Netdata container...${NC}"
+        docker stop netdata 2>/dev/null || true
+        docker rm netdata 2>/dev/null || true
+    fi
     
     # Start Netdata
     cd /opt/netdata
@@ -462,13 +479,7 @@ configure_docker_security() {
             "Name": "nofile",
             "Soft": 64000
         }
-    },
-    "log-level": "info",
-    "max-concurrent-downloads": 10,
-    "max-concurrent-uploads": 5,
-    "storage-opts": [
-        "overlay2.override_kernel_check=true"
-    ]
+    }
 }
 EOF
     
@@ -512,8 +523,8 @@ show_docker_status() {
     fi
     
     # Docker Compose version
-    if command -v docker-compose >/dev/null 2>&1; then
-        echo -e "${WHITE}Docker Compose Version:${NC} $(docker-compose --version)"
+    if command -v docker compose >/dev/null 2>&1; then
+        echo -e "${WHITE}Docker Compose Version:${NC} $(docker compose version)"
     elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
         echo -e "${WHITE}Docker Compose Version:${NC} $(docker compose version --short)"
     fi

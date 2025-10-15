@@ -86,6 +86,7 @@ install_essential_packages() {
         "htop"
         "rsync"
         "lsb_release"
+        "net-tools"
     )
     
     log "Installing essential packages..."

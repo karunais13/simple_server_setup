@@ -9,7 +9,7 @@ A comprehensive, interactive server setup and installation process for Ubuntu se
 - **User Management**: User creation, SSH configuration, and security policies
 - **Web Server Setup**: Nginx installation with virtual hosts
 - **Monitoring**: Basic monitoring tools and Netdata integration
-- **Container Support**: Docker and Docker Compose installation
+- **Container Support**: Docker and Docker Compose v2 installation
 - **Elasticsearch & Kibana**: Advanced log monitoring and querying with Logstash
 
 ### Security Features

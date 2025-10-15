@@ -39,14 +39,19 @@ install_nginx() {
     # Update package lists
     apt update
     
-    # Install Nginx
-    apt install -y nginx
+    # Install Nginx and PHP-FPM
+    apt install -y nginx php-fpm php-cli
     
-    # Start and enable Nginx
+    # Start and enable services
     systemctl start nginx
     systemctl enable nginx
     
-    echo -e "${GREEN}Nginx installed successfully${NC}"
+    # Start PHP-FPM (detect version automatically)
+    PHP_VERSION=$(php -v | head -n 1 | cut -d' ' -f2 | cut -d'.' -f1,2)
+    systemctl start php${PHP_VERSION}-fpm
+    systemctl enable php${PHP_VERSION}-fpm
+    
+    echo -e "${GREEN}Nginx and PHP-FPM installed successfully${NC}"
 }
 
 # Configure Nginx
@@ -167,6 +172,74 @@ server {
 }
 EOF
     
+    # Create system info API PHP script
+    cat > /var/www/html/api.php << 'EOF'
+<?php
+header('Content-Type: text/plain');
+header('Access-Control-Allow-Origin: *');
+header('Cache-Control: no-cache, no-store, must-revalidate');
+header('Pragma: no-cache');
+header('Expires: 0');
+
+$endpoint = $_GET['endpoint'] ?? '';
+
+switch ($endpoint) {
+    case 'uptime':
+        echo trim(shell_exec('uptime -p'));
+        break;
+    case 'load':
+        $uptime = shell_exec('uptime');
+        if (preg_match('/load average:\s*(.+)/', $uptime, $matches)) {
+            echo trim($matches[1]);
+        } else {
+            echo 'N/A';
+        }
+        break;
+    case 'memory':
+        $free = shell_exec('free -h');
+        $lines = explode("\n", $free);
+        if (isset($lines[1])) {
+            $parts = preg_split('/\s+/', trim($lines[1]));
+            if (count($parts) >= 3) {
+                $used = $parts[2];
+                $total = $parts[1];
+                $percentage = round(($parts[2] / $parts[1]) * 100, 1);
+                echo "$used/$total ($percentage%)";
+            } else {
+                echo 'N/A';
+            }
+        } else {
+            echo 'N/A';
+        }
+        break;
+    case 'disk':
+        $df = shell_exec('df -h /');
+        $lines = explode("\n", $df);
+        if (isset($lines[1])) {
+            $parts = preg_split('/\s+/', trim($lines[1]));
+            if (count($parts) >= 5) {
+                $used = $parts[2];
+                $total = $parts[1];
+                $percentage = $parts[4];
+                echo "$used/$total ($percentage)";
+            } else {
+                echo 'N/A';
+            }
+        } else {
+            echo 'N/A';
+        }
+        break;
+    default:
+        http_response_code(400);
+        echo 'Invalid endpoint';
+        break;
+}
+?>
+EOF
+    
+    # Get PHP version for socket path
+    PHP_VERSION=$(php -v | head -n 1 | cut -d' ' -f2 | cut -d'.' -f1,2)
+    
     # Create monitoring dashboard site
     cat > /etc/nginx/sites-available/monitoring << EOF
 server {
@@ -180,29 +253,33 @@ server {
         try_files \$uri \$uri/ =404;
     }
     
-    # API endpoints for monitoring dashboard - simplified static responses
+    # API endpoints for monitoring dashboard
     location /api/uptime {
-        default_type text/plain;
-        add_header Access-Control-Allow-Origin *;
-        return 200 "System uptime: Available via monitoring dashboard";
+        fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/api.php;
+        fastcgi_param QUERY_STRING endpoint=uptime;
+        include fastcgi_params;
     }
     
     location /api/load {
-        default_type text/plain;
-        add_header Access-Control-Allow-Origin *;
-        return 200 "System load: Available via monitoring dashboard";
+        fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/api.php;
+        fastcgi_param QUERY_STRING endpoint=load;
+        include fastcgi_params;
     }
     
     location /api/memory {
-        default_type text/plain;
-        add_header Access-Control-Allow-Origin *;
-        return 200 "Memory usage: Available via monitoring dashboard";
+        fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/api.php;
+        fastcgi_param QUERY_STRING endpoint=memory;
+        include fastcgi_params;
     }
     
     location /api/disk {
-        default_type text/plain;
-        add_header Access-Control-Allow-Origin *;
-        return 200 "Disk usage: Available via monitoring dashboard";
+        fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/api.php;
+        fastcgi_param QUERY_STRING endpoint=disk;
+        include fastcgi_params;
     }
 }
 EOF
@@ -290,10 +367,12 @@ create_web_content() {
         
         <div class="info">
             <h3>Server Information:</h3>
-            <p><strong>Hostname:</strong> $(hostname)</p>
-            <p><strong>IP Address:</strong> $(hostname -I | awk '{print $1}')</p>
-            <p><strong>Uptime:</strong> $(uptime -p)</p>
-            <p><strong>Load Average:</strong> $(uptime | awk -F'load average:' '{print $2}')</p>
+            <p><strong>Hostname:</strong> <span id="hostname">Loading...</span></p>
+            <p><strong>IP Address:</strong> <span id="ip-address">Loading...</span></p>
+            <p><strong>Uptime:</strong> <span id="uptime">Loading...</span></p>
+            <p><strong>Load Average:</strong> <span id="load-average">Loading...</span></p>
+            <p><strong>Memory Usage:</strong> <span id="memory-usage">Loading...</span></p>
+            <p><strong>Disk Usage:</strong> <span id="disk-usage">Loading...</span></p>
         </div>
         
         <div class="info">
@@ -329,6 +408,68 @@ create_web_content() {
             <code>./setup.sh</code> - Run setup menu again
         </div>
     </div>
+    
+    <script>
+        // Function to update server information
+        async function updateServerInfo() {
+            try {
+                // Fetch server information from API endpoints
+                const [uptimeResponse, loadResponse, memoryResponse, diskResponse] = await Promise.all([
+                    fetch('/api/uptime'),
+                    fetch('/api/load'),
+                    fetch('/api/memory'),
+                    fetch('/api/disk')
+                ]);
+                
+                // Update hostname (static)
+                document.getElementById('hostname').textContent = window.location.hostname;
+                
+                // Update IP address (static)
+                document.getElementById('ip-address').textContent = window.location.hostname;
+                
+                // Update dynamic information
+                if (uptimeResponse.ok) {
+                    document.getElementById('uptime').textContent = await uptimeResponse.text();
+                } else {
+                    document.getElementById('uptime').textContent = 'System uptime: Available via monitoring dashboard';
+                }
+                
+                if (loadResponse.ok) {
+                    document.getElementById('load-average').textContent = await loadResponse.text();
+                } else {
+                    document.getElementById('load-average').textContent = 'System load: Available via monitoring dashboard';
+                }
+                
+                if (memoryResponse.ok) {
+                    document.getElementById('memory-usage').textContent = await memoryResponse.text();
+                } else {
+                    document.getElementById('memory-usage').textContent = 'Memory usage: Available via monitoring dashboard';
+                }
+                
+                if (diskResponse.ok) {
+                    document.getElementById('disk-usage').textContent = await diskResponse.text();
+                } else {
+                    document.getElementById('disk-usage').textContent = 'Disk usage: Available via monitoring dashboard';
+                }
+                
+            } catch (error) {
+                console.error('Error fetching server information:', error);
+                // Fallback to static information
+                document.getElementById('hostname').textContent = window.location.hostname;
+                document.getElementById('ip-address').textContent = window.location.hostname;
+                document.getElementById('uptime').textContent = 'System uptime: Available via monitoring dashboard';
+                document.getElementById('load-average').textContent = 'System load: Available via monitoring dashboard';
+                document.getElementById('memory-usage').textContent = 'Memory usage: Available via monitoring dashboard';
+                document.getElementById('disk-usage').textContent = 'Disk usage: Available via monitoring dashboard';
+            }
+        }
+        
+        // Update server information on page load
+        document.addEventListener('DOMContentLoaded', updateServerInfo);
+        
+        // Update server information every 30 seconds
+        setInterval(updateServerInfo, 30000);
+    </script>
 </body>
 </html>
 EOF
